@@ -82,8 +82,8 @@ libstore.nix_libstore_init()
 
 class StorePath extends CWrapper(libstore.nix_store_path_free) {
     constructor(store, path) {
+        super(libstore.nix_store_parse_path(store, path))
         this.store = store
-        super(libstore.nix_store_parse_path(store.ref, path))
     }
     isValid() {
         return libstore.nix_store_is_valid_path(this.store, this)
@@ -131,11 +131,25 @@ class State extends CWrapper(libexpr.nix_state_free) {
         const r = libexpr.nix_alloc_value(this)
         return new Value(this, r, false)
     }
+    makeValue(js_obj) {
+        const r = this.allocValue()
+        r.set(js_obj)
+        return r
+    }
     eval(expr, path="") {
         const r = this.allocValue()
         libexpr.nix_expr_eval_from_string(this, expr, path, r)
         r.force()
         return r
+    }
+}
+
+class BindingsBuilder extends CWrapper(libexpr.nix_bindings_builder_free) {
+    constructor(state, sz) {
+        super(libexpr.nix_make_bindings_builder(state, sz))
+    }
+    insert(key, val) {
+        libexpr.nix_bindings_builder_insert(this, key, val)
     }
 }
 
@@ -146,7 +160,11 @@ class Value extends CWrapper(libexpr.nix_gc_decref) {
         super(ref)
         this.state = state
         if (force) this.force()
-        return new Proxy(this, {
+        // double wrapper, because I need something callable
+        const thiz = (function Wrap(...args) { return thiz.call(...args) })
+        Object.setPrototypeOf(thiz, new.target.prototype)
+        Object.assign(thiz, this)
+        return new Proxy(thiz, {
             get: function(target, prop, receiver) {
                 if (prop in target) {
                     return Reflect.get(...arguments)
@@ -294,16 +312,60 @@ class Value extends CWrapper(libexpr.nix_gc_decref) {
         case "external":
             return new External(this)
         case "function":
-            return (x, ...args) => {
-                const res = this.state.allocValue()
-                libexpr.nix_value_call(this.state, this, x, res)
-                res.force()
-                if (args.length) {
-                    return res.get()(...args)
-                } else return res
+            return (...args) => {
+                return this.call(...args)
             }
         default:
             throw new Error("unknown type: " + this.getType())
+        }
+    }
+    set(js_obj) {
+        if (js_obj instanceof Value) {
+            libexpr.nix_copy_value(this, js_obj)
+            return
+        }
+        switch (typeof js_obj) {
+        case "number": {
+            if (Number.isInteger(js_obj)) {
+                libexpr.nix_set_int(this, js_obj)
+            } else {
+                libexpr.nix_set_float(this, js_obj)
+            }
+            break
+        }
+        case "bigint":
+            libexpr.nix_set_int(this, js_obj.toString())
+            break
+        case "boolean":
+            libexpr.nix_set_bool(this, js_obj)
+            break
+        case "string":
+            libexpr.nix_set_string(this, js_obj)
+            break
+        case "object":
+            if (js_obj === null) {
+                libexpr.nix_set_null(this)
+            } else if (Array.isArray(js_obj)) {
+                const size = js_obj.length
+                libexpr.nix_make_list(this.state, this, size)
+                for (let i = 0; i < size; i++) {
+                    const val_obj = this.state.allocValue()
+                    libexpr.nix_set_list_byidx(this, i, val_obj)
+                    val_obj.set(js_obj[i])
+                }
+            } else {
+                const keys = Object.keys(js_obj)
+                const bb = new BindingsBuilder(this.state, keys.length)
+                for (const key of keys) {
+                    const v = this.state.allocValue()
+                    v.set(js_obj[key])
+                    bb.insert(key, v)
+                }
+                libexpr.nix_make_attrs(this, bb)
+            }
+            break
+        default:
+            throw new Error("unknown type: " + typeof js_obj)
         }
     }
     force() {
@@ -312,10 +374,14 @@ class Value extends CWrapper(libexpr.nix_gc_decref) {
     forceDeep() {
         libexpr.nix_value_force_deep(this.state, this)
     }
-    call(args) {
+    call(arg, ...args) {
+        const nixArg = arg instanceof Value ? arg : this.state.makeValue(arg)
         const r = this.state.allocValue()
-        libexpr.nix_value_call(this.state, this, args, r)
+        libexpr.nix_value_call(this.state, this, nixArg, r)
         r.force()
+        if (args.length) {
+            return r.call(...args)
+        }
         return r
     }
 }

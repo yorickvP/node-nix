@@ -98,6 +98,9 @@ export const libexpr_fns = {
     nix_set_list_byidx: [ nix_err, [ contextPtr, valuePtr, 'uint', valuePtr ] ],
     nix_make_attrs: [ nix_err, [ contextPtr, valuePtr, bindingsBuilderPtr ] ],
     nix_set_primop: [ nix_err, [ contextPtr, valuePtr, primOpPtr ] ],
-    nix_copy_value: [ nix_err, [ contextPtr, valuePtr, valuePtr ] ]
+    nix_copy_value: [ nix_err, [ contextPtr, valuePtr, valuePtr ] ],
+    nix_make_bindings_builder: [ bindingsBuilderPtr, [ contextPtr, statePtr, 'uint' ] ],
+    nix_bindings_builder_insert: [ nix_err, [ contextPtr, bindingsBuilderPtr, 'string', valuePtr ] ],
+    nix_bindings_builder_free: [ 'void', [ bindingsBuilderPtr ] ],
 }
 export const libexpr_unwrapped = ffi.Library('libnixexpr', libexpr_fns)

@@ -156,7 +156,7 @@ class State extends CWrapper(libexpr.nix_state_free) {
     const r = libexpr.nix_alloc_value(this)
     return new Value(this, r, false)
   }
-  makeValue<T extends Convertible>(js_obj: T): Value<T> {
+  makeValue<T extends Convertible>(js_obj: T): Value<ToType<T>> {
     const r: Value<unknown> = this.allocValue()
     r.set(js_obj)
     return r
@@ -181,7 +181,7 @@ class BindingsBuilder extends CWrapper(libexpr.nix_bindings_builder_free) {
 const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom');
 type TupleToUnion<T extends unknown[]> = T[number];
 
-interface TypeRegistry_<deep> {
+interface TypeRegistry<deep=false> {
   thunk: never,
   int: number,
   float: number,
@@ -194,13 +194,20 @@ interface TypeRegistry_<deep> {
   function: never,
   external: never
 }
-type TypeRegistry = TypeRegistry_<false>
-type TypeRegistryDeep = TypeRegistry_<true>
-type TypeKey = TypeRegistry extends TypeRegistry ? keyof TypeRegistry : never
+type TypeKey = keyof TypeRegistry
+
+type ToType<X> =
+  X extends number ? "int" | "float" :
+  X extends boolean ? "bool" :
+  X extends string ? "string" | "path" :
+  X extends null ? "null" :
+  X extends any[] ? "list" :
+  X extends Record<string, any> ? "attrs" : never
 
 class Value<V> extends CWrapper(libexpr.nix_gc_decref) {
   x?: V
   state: State
+  [x: string]: Function | State | V | undefined | Value<unknown>
   constructor(state: State, ref: Pointer<unknown>, force: boolean=true) {
     super(ref)
     this.state = state
@@ -217,6 +224,7 @@ class Value<V> extends CWrapper(libexpr.nix_gc_decref) {
         } else {
           //console.log("getting", prop)
           if (typeof prop == 'symbol') return
+          if (!target.isType(["attrs", "list"])) return
           return target.lookup(prop)
         }
       },
@@ -225,6 +233,7 @@ class Value<V> extends CWrapper(libexpr.nix_gc_decref) {
         const op = Reflect.getOwnPropertyDescriptor(target, prop)
         if (op) return op
         if (typeof prop == 'symbol') return
+        if (!target.isType(["attrs", "list"])) return
         if (target.hasAttr(prop)) {
           return {
             configurable: true,
@@ -234,7 +243,7 @@ class Value<V> extends CWrapper(libexpr.nix_gc_decref) {
         }
       },
       has(target, prop) {
-        return prop in target || (typeof prop == "string" && target.hasAttr(prop))
+        return prop in target || (typeof prop == "string" && target.isType(["attrs", "list"]) && target.hasAttr(prop))
       },
       ownKeys(target) {
         try {
@@ -274,7 +283,7 @@ class Value<V> extends CWrapper(libexpr.nix_gc_decref) {
   [Symbol.toPrimitive](_hint: "number" | "string" | "default") {
     return this.get()
   }
-  lookup(key: string | number) {
+  lookup<T extends "attrs" | "list">(this: Value<T>, key: string | number) {
     const t = this.getType()
     if (t == "list") {
       const keyI = +key
@@ -320,7 +329,7 @@ class Value<V> extends CWrapper(libexpr.nix_gc_decref) {
       throw new Error("can't get keys for " + t)
     }
   }
-  hasAttr(key: number | string) {
+  hasAttr<T extends "attrs" | "list">(this: Value<T>, key: number | string) {
     const t = this.getType()
     if (t == "list") {
       return (+key | 0) == +key && key < this.length
@@ -330,7 +339,7 @@ class Value<V> extends CWrapper(libexpr.nix_gc_decref) {
     return false
   }
   get<T extends (V extends TypeKey ? V : never)>(): TypeRegistry[T] extends never ? Converted : TypeRegistry[T]
-  get<T extends (V extends TypeKey ? V : never), D extends boolean>(deep: D): TypeRegistry_<D>[T] extends never ? DeepConverted : TypeRegistry_<D>[T]
+  get<T extends (V extends TypeKey ? V : never), D extends boolean>(deep: D): TypeRegistry<D>[T] extends never ? DeepConverted : TypeRegistry<D>[T]
   //get(deep?: false): V extends TypeKey ? TypeRegistry[V] extends Converted ? TypeRegistry[V] : never : Converted
   //get(deep: true): V extends TypeKey ? TypeRegistryDeep[V] extends DeepConverted ? TypeRegistryDeep[V] : never : DeepConverted
   get(deep=false): Converted | DeepConverted {
@@ -381,7 +390,7 @@ class Value<V> extends CWrapper(libexpr.nix_gc_decref) {
     }
   }
   set<T extends V>(js_obj: Value<T>): asserts this is Value<T>
-  set<T extends V>(js_obj: T): asserts this is Value<T>
+  set<T extends Convertible, G extends (unknown extends V ? any : never)>(this: Value<G>, js_obj: T): asserts this is Value<ToType<T>>
   set(js_obj: Convertible): void {
     if (js_obj instanceof Value) {
       libexpr.nix_copy_value(this, js_obj)
@@ -454,11 +463,12 @@ const state = new State(store)
 function nix(str: string) {
   return state.eval(str)
 }
-const v: Value<unknown> = state.allocValue()
 
-if (v.isType(["int", "bool"])) {
-  const y = v.get()
-}
+// const v: Value<unknown> = state.allocValue()
+// v.set(10)
+// if (v.isType(["int", "bool"])) {
+//   const y: number = v.get()
+//}
 
 //const y = n.get<"int">()
   //y

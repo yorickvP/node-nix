@@ -1,9 +1,10 @@
-import ref from "ref-napi"
-import ffi from "ffi-napi"
+import * as ref from "ref-napi"
+import { Library } from "ffi-napi"
+import type { LibraryObjectDefinitionBase  } from "ffi-napi"
 
 const context = 'void'
 export const contextPtr = ref.refType(context)
-export const nix_err = ffi.types.int
+export const nix_err = 'int'
 
 export const nix_errs = {
     NIX_OK: 0,
@@ -13,7 +14,7 @@ export const nix_errs = {
     NIX_ERR_NIX_ERROR: -4
 }
 
-export const libutil_fns = {
+export const libutil_fns: LibraryObjectDefinitionBase = {
     'nix_version_get': [ 'string', [] ],
     'nix_libutil_init': [ nix_err, [contextPtr] ],
     'nix_c_context_create': [ contextPtr, [] ],
@@ -21,13 +22,13 @@ export const libutil_fns = {
     'nix_err_code': [ nix_err, [contextPtr] ],
     'nix_err_msg': [ 'string', [ contextPtr, contextPtr, 'int*' ] ]
 }
-export const libutil_unwrapped = ffi.Library('libnixutil', libutil_fns)
+export const libutil_unwrapped = Library('libnixutil', libutil_fns)
 
 
 export const storePtr = ref.refType('void')
 export const storePathPtr = ref.refType('void')
 
-export const libstore_fns = {
+export const libstore_fns: LibraryObjectDefinitionBase = {
     nix_libstore_init: [ nix_err, [contextPtr] ],
     nix_store_open: [ storePtr, [ contextPtr, 'string', 'void***' ] ],
     nix_store_unref: [ 'void', [storePtr]],
@@ -38,7 +39,7 @@ export const libstore_fns = {
     nix_store_build: [ nix_err, [ contextPtr, storePtr, storePathPtr, 'void*', 'pointer'] ],
     nix_store_get_version: [ nix_err, [ contextPtr, storePtr, 'void*', 'uint' ] ]
 }
-export const libstore_unwrapped = ffi.Library('libnixstore', libstore_fns)
+export const libstore_unwrapped = Library('libnixstore', libstore_fns)
 
 export const statePtr = ref.refType('void')
 export const valuePtr = ref.refType('void')
@@ -60,7 +61,7 @@ export const valueTypes = {
     NIX_TYPE_EXTERNAL: 10
 }
 export const rValueTypes = ["thunk", "int", "float", "bool", "string", "path", "null", "attrs", "list", "function", "external"]
-export const libexpr_fns = {
+export const libexpr_fns: LibraryObjectDefinitionBase = {
     nix_libexpr_init: [ nix_err, [contextPtr] ],
     nix_state_create: [ statePtr, [contextPtr, ref.refType('string'), storePtr ] ],
     nix_state_free: [ 'void', [statePtr] ],
@@ -103,4 +104,4 @@ export const libexpr_fns = {
     nix_bindings_builder_insert: [ nix_err, [ contextPtr, bindingsBuilderPtr, 'string', valuePtr ] ],
     nix_bindings_builder_free: [ 'void', [ bindingsBuilderPtr ] ],
 }
-export const libexpr_unwrapped = ffi.Library('libnixexpr', libexpr_fns)
+export const libexpr_unwrapped = Library('libnixexpr', libexpr_fns)
